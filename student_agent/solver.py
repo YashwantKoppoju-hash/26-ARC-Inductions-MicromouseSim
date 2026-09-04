@@ -25,6 +25,7 @@ class  pose:
 class Motionstate:
     velocity: float
     targetVelocity: float
+    angularVelocity: float
     Acceleration: bool
 
 @dataclass
@@ -32,44 +33,44 @@ class SensorValues:
     left: float = math.inf
     right: float = math.inf
     forward: float = math.inf
-    linearVelocity: float = 0.0
-    angularVelocity: float = 0.0
+    velocity: float = 0.0
 
 def updatePose(
     pose: pose,
     motionstate: Motionstate,
     sensorvalues: SensorValues,
     dt: float,
-) -> pose:
-    """Update and return the existing pose using measured motion."""
+) -> None:
+    """Update the existing pose using the latest measured motion."""
     if dt <= 0.0:
-        return pose
-
-    # The flag describes whether the measured speed has reached its target.
-    motionstate.Acceleration = not math.isclose(
-        sensorvalues.linearVelocity,
-        motionstate.targetVelocity,
-        abs_tol=VELOCITY_TOLERANCE,
-    )
+        return
 
     # During acceleration or braking, use the average of the previous and
     # current measured velocities. Otherwise, the current measured velocity
     # is already equal to the target within tolerance.
     if motionstate.Acceleration:
         linear_velocity = 0.5 * (
-            motionstate.velocity + sensorvalues.linearVelocity
+            motionstate.velocity + sensorvalues.velocity
         )
     else:
-        linear_velocity = sensorvalues.linearVelocity
+        linear_velocity = motionstate.velocity
 
     # Angular velocity is applied instantaneously by the simulator.
-    pose.theta += sensorvalues.angularVelocity * dt
+    pose.theta += motionstate.angularVelocity * dt
     pose.x += linear_velocity * math.cos(pose.theta) * dt
     pose.y += linear_velocity * math.sin(pose.theta) * dt
 
-    # Preserve the current measured velocity for the next interval.
-    motionstate.velocity = sensorvalues.linearVelocity
-    return pose
+def updateMotionState(
+    motionstate: Motionstate,
+    sensorvalues: SensorValues,
+) -> None:
+    """Update motion state from the latest sensor velocity reading."""
+    motionstate.velocity = sensorvalues.velocity
+    motionstate.Acceleration = not math.isclose(
+        motionstate.velocity,
+        motionstate.targetVelocity,
+        abs_tol=VELOCITY_TOLERANCE,
+    )
 
 class StudentSolver(Node):
     def __init__(self):
@@ -79,6 +80,7 @@ class StudentSolver(Node):
         self.motionstate = Motionstate(
             velocity=0.0,
             targetVelocity=0.0,
+            angularVelocity=0.0,
             Acceleration=False,
         )
         self.sensorvalues = SensorValues()
@@ -123,12 +125,13 @@ class StudentSolver(Node):
 
         now = time.monotonic()
         dt = now - self.last_pose_update
-        self.pose = updatePose(
+        updatePose(
             self.pose,
             self.motionstate,
             self.sensorvalues,
             dt,
         )
+        updateMotionState(self.motionstate, self.sensorvalues)
         self.last_pose_update = now
 
         cmd = Twist()
@@ -136,8 +139,8 @@ class StudentSolver(Node):
         self.cmd_pub.publish(cmd)
 
     def velocity_callback(self, msg):
-        self.sensorvalues.linearVelocity = msg.linear.x
-        self.sensorvalues.angularVelocity = msg.angular.z
+        self.sensorvalues.velocity = msg.linear.x
+        self.motionstate.angularVelocity = msg.angular.z
 
 def main(args=None):
     rclpy.init(args=args)
