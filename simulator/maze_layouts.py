@@ -68,7 +68,7 @@ def generate_maze(seed: int = 67) -> np.ndarray:
 # ==========================================
 # True  = Uses the same map every time (good for testing/tuning).
 # False = Generates a completely new random map on every run.
-USE_FIXED_MAP = True
+USE_FIXED_MAP = False
 
 if USE_FIXED_MAP:
     print("[Maze Generator] Loading fixed layout (Seed: 67)...")

@@ -4,6 +4,28 @@ Welcome to the induction program for our club. This repository will guide you th
 
 Your objective is to write a maze-solving algorithm inside `student_agent/solver.py` to navigate a virtual robot through an unknown maze and park it inside the green 2x2 goal zone. 
 
+## Attempt #2
+
+This branch implements online A* with PID wall centring. Start a fresh simulator,
+then run `python3 student_agent/solver.py` inside the container. The solver assumes
+the initial position (1.5, 1.5), facing north. Restart the solver together with the
+simulator for another run. Random layouts are enabled.
+
+The ROS adapter is in `solver.py`; shared dataclasses are in `state.py`, wall PID
+and pose estimation in `control.py`, map/A* in `navigation.py`, and movement
+coordination in `navigator.py`. This branch deliberately uses multiple modules.
+The simulator engine is unchanged; its reported speed can remain nonzero when
+a wall prevents movement.
+
+Run regressions inside the ROS container with
+`python3 -m unittest tests.test_navigation -v`.
+Run ten concurrent random mazes with real ROS message delivery using
+`python3 -m tests.run_mazes --workers 10 --ros --jitter --delay-frames 1`.
+The headless tests use the actual engine physics and simulated time; each ROS
+worker has an isolated domain. Traces compare engine truth with the solver's
+estimate. See [Design Spec #2](Design%20Spec%20%232.md) and
+[validation results](docs/attempt2-validation.md).
+
 ---
 
 ## Contents

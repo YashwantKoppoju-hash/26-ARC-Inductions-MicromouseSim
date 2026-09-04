@@ -1,59 +1,92 @@
+"""ROS adapter for online A* navigation and PID wall centring.
+
+Run with python3 student_agent/solver.py or python3 -m student_agent.solver.
 """
-Write your own solver in the scan_callback function
-"""
+
+import json
+from pathlib import Path
+import sys
+import time
+
+ROOT = str(Path(__file__).resolve().parents[1])
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 
-# ==========================================
-# These four parameters MUST add up to exactly 30!
-# ==========================================
+from student_agent.navigator import Navigator
+from student_agent.state import Command, MotionState, SensorValues
+
+# These four parameters MUST add up to exactly 30.
 TOP_SPEED = 8
 ACCELARATION = 7
 TURN_SPEED = 5
 SENSOR_RANGE = 10
 
+
 class StudentSolver(Node):
     def __init__(self):
         super().__init__('student_solver')
-        
-        # subscriber to read sensor values (L,F,R)
-        self.scan_sub = self.create_subscription(
-            LaserScan,
-            '/mouse/scan',
-            self.scan_callback,
-            10
-        )
-        
-        # publisher to send movement commands
-        self.cmd_pub = self.create_publisher(
-            Twist,
-            '/mouse/cmd_vel',
-            10
-        )
-        
-        self.get_logger().info("Student Solver Node initialized successfully.")
-        self.get_logger().info(f"Stats -> Speed: {TOP_SPEED}, Accel: {ACCELARATION}, Turn: {TURN_SPEED}, Range: {SENSOR_RANGE}")
+        self.navigator = Navigator(TOP_SPEED * 0.2, ACCELARATION * 0.1,
+                                   TURN_SPEED * 0.15, SENSOR_RANGE * 0.4)
+        self.scan = None
+        self.motion = MotionState()
+        self.new_scan = self.new_motion = False
+        self.previous_stamp = None
+        self.last_pair = time.monotonic()
+        self.last_log = 0.0
+        self.last_phase = None
+        self.scan_sub = self.create_subscription(LaserScan, '/mouse/scan', self.scan_callback, 10)
+        self.velocity_sub = self.create_subscription(Twist, '/mouse/vel', self.velocity_callback, 10)
+        self.cmd_pub = self.create_publisher(Twist, '/mouse/cmd_vel', 10)
+        self.watchdog = self.create_timer(0.1, self.check_freshness)
+        self.get_logger().info('A* solver ready: pose estimation, wall PID, 30/30 stat points')
+
+    def publish(self, command):
+        msg = Twist()
+        msg.linear.x, msg.angular.z = float(command.linear), float(command.angular)
+        self.cmd_pub.publish(msg)
 
     def scan_callback(self, msg):
-        """
-        This function runs every time a new sensor reading is received (at 20 Hz).
-        msg.ranges contains the distances:
-        msg.ranges[0] -> Left ray distance
-        msg.ranges[1] -> Front ray distance
-        msg.ranges[2] -> Right ray distance
-        """
-        d_left = msg.ranges[0]
-        d_front = msg.ranges[1]
-        d_right = msg.ranges[2]
-        
-        cmd = Twist()
-        
-        #-------- WRITE YOUR ALGORITHM LOGIC HERE -----------
-            
-        self.cmd_pub.publish(cmd)
+        if len(msg.ranges) != 3:
+            self.navigator.fail('Expected exactly three range readings')
+            self.publish(Command())
+            return
+        self.scan = msg
+        self.new_scan = True
+        self.consume_pair()
+
+    def velocity_callback(self, msg):
+        self.motion = MotionState(msg.linear.x, msg.angular.z)
+        self.new_motion = True
+        self.consume_pair()
+
+    def consume_pair(self):
+        if not (self.new_scan and self.new_motion):
+            return
+        self.new_scan = self.new_motion = False
+        stamp = self.scan.header.stamp.sec + self.scan.header.stamp.nanosec * 1e-9
+        if self.previous_stamp is not None and stamp <= self.previous_stamp:
+            return
+        dt = 0.05 if self.previous_stamp is None else stamp - self.previous_stamp
+        self.previous_stamp = stamp
+        self.last_pair = time.monotonic()
+        sensors = SensorValues(*self.scan.ranges)
+        self.publish(self.navigator.step(sensors, self.motion, dt))
+        if self.last_pair - self.last_log >= 1.0 or self.navigator.phase != self.last_phase:
+            record = self.navigator.status()
+            record.update(scan=list(self.scan.ranges),
+                          reported_velocity=[self.motion.linear_velocity, self.motion.angular_velocity])
+            self.get_logger().info(json.dumps(record))
+            self.last_log, self.last_phase = self.last_pair, self.navigator.phase
+
+    def check_freshness(self):
+        if time.monotonic() - self.last_pair > 0.25:
+            self.publish(Command())
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -63,9 +96,10 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.publish(Command())
         node.destroy_node()
         rclpy.shutdown()
 
+
 if __name__ == '__main__':
     main()
-

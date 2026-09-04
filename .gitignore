@@ -35,3 +35,6 @@ Thumbs.db
 
 # === Docker Logs ===
 .dockerignore
+
+# Generated per-run simulator traces.
+artifacts/maze-tests/
