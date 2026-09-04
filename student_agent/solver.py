@@ -1,7 +1,4 @@
-"""
-Write your own solver in the scan_callback function
-"""
-
+from dataclasses import dataclass
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
@@ -15,6 +12,11 @@ ACCELARATION = 7
 TURN_SPEED = 5
 SENSOR_RANGE = 10
 
+@dataclass
+class  pose:
+    x: float
+    y: float
+    theta: float
 class StudentSolver(Node):
     def __init__(self):
         super().__init__('student_solver')
@@ -50,31 +52,6 @@ class StudentSolver(Node):
         d_right = msg.ranges[2]
         
         cmd = Twist()
-        
-        #-------- DEMO LOGIC, REMOVE THIS AND WRITE YOUR OWN ---------
-        # 1. Front is blocked -> Pivot strictly in place (do not move forward!)
-        # Increased threshold to 0.65 so it has room to spin without its 0.15 radius clipping the front wall
-        if d_front < 0.65:
-            cmd.linear.x = 0.0
-            cmd.angular.z = -1.5  # Spin clockwise (right)
-            
-        # 2. Left side is open -> Curve around the corner
-        elif d_left > 0.8:
-            cmd.linear.x = 0.3
-            cmd.angular.z = 1.2   # Turn left
-            
-        # 3. Wall hugging -> P-Controller
-        else:
-            cmd.linear.x = 0.5
-            
-            # The cell is 1.0 units wide. Perfect center is 0.5.
-            target_distance = 0.5 
-            error = d_left - target_distance
-            
-            # Multiply error by a gain to steer back to the center
-            cmd.angular.z = error * 3.0
-        #-----------------------------------------------------------------
-            
         self.cmd_pub.publish(cmd)
 
 def main(args=None):
