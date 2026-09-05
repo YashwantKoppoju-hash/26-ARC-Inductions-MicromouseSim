@@ -14,6 +14,8 @@ class MazeMap:
         self.size = size
         self.known_mask = [[0] * size for _ in range(size)]
         self.wall_mask = [[0] * size for _ in range(size)]
+        self.traversed = set()
+        self.conflicts = 0
         for n in range(size):
             self.set_edge(Cell(0, n), Direction.SOUTH, True)
             self.set_edge(Cell(size - 1, n), Direction.NORTH, True)
@@ -33,6 +35,9 @@ class MazeMap:
 
     def set_edge(self, cell, direction, wall):
         adjacent = direction.neighbour(cell)
+        if wall and frozenset((cell, adjacent)) in self.traversed:
+            self.conflicts += 1
+            return
         if not self.contains(adjacent):
             wall = True
         for target, side in ((cell, direction), (adjacent, direction.rotated(2))):
@@ -42,6 +47,14 @@ class MazeMap:
                     self.wall_mask[target.row][target.column] |= side
                 else:
                     self.wall_mask[target.row][target.column] &= ~side
+
+    def mark_traversed(self, cell, direction):
+        """A successful crossing is permanent free-space evidence in a static maze."""
+        adjacent = direction.neighbour(cell)
+        if not self.contains(cell) or not self.contains(adjacent):
+            raise ValueError('Cannot traverse a maze boundary')
+        self.traversed.add(frozenset((cell, adjacent)))
+        self.set_edge(cell, direction, False)
 
 
 class AStarPlanner:

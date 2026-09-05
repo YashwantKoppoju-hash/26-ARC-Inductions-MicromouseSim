@@ -11,20 +11,57 @@ then run `python3 student_agent/solver.py` inside the container. The solver assu
 the initial position (1.5, 1.5), facing north. Restart the solver together with the
 simulator for another run. Random layouts are enabled.
 
+For a fresh live run from PowerShell:
+
+```powershell
+docker compose up -d --force-recreate micromouse_simulator
+docker exec micromouse_simulator bash -lc "source /opt/ros/humble/setup.bash && python3 student_agent/solver.py"
+```
+
+Mapping uses reciprocal unknown/open/wall edges. Successfully traversed edges
+remain open in this static maze; contradictory sensor observations are counted
+in `map_conflicts`. Observations require cardinal alignment and a ray crossing
+away from cell corners, with an uncertainty band around wall detections.
+The planner uses heap-based A* with unit edge costs and Manhattan distance;
+regressions compare its path lengths against independent breadth-first search.
+
 The ROS adapter is in `solver.py`; shared dataclasses are in `state.py`, wall PID
 and pose estimation in `control.py`, map/A* in `navigation.py`, and movement
 coordination in `navigator.py`. This branch deliberately uses multiple modules.
 The simulator engine is unchanged; its reported speed can remain nonzero when
 a wall prevents movement.
 
-Run regressions inside the ROS container with
+Legacy isolated regressions (not acceptance tests) can be run inside the ROS container with
 `python3 -m unittest tests.test_navigation -v`.
-Run ten concurrent random mazes with real ROS message delivery using
+The legacy synchronous test runner is
 `python3 -m tests.run_mazes --workers 10 --ros --jitter --delay-frames 1`.
 The headless tests use the actual engine physics and simulated time; each ROS
-worker has an isolated domain. Traces compare engine truth with the solver's
+worker has an isolated domain. This runner waits for commands before advancing
+physics and does not validate live timing. Acceptance tests must use the actual
+rendered simulator with normal ROS scheduling. Traces compare engine truth with the solver's
 estimate. See [Design Spec #2](Design%20Spec%20%232.md) and
 [validation results](docs/attempt2-validation.md).
+
+Overshoot and front clearance below 0.3 trigger `RECOVER_BRAKE`. Recovery uses
+slow motion toward the estimated occupied cell center, with a bounded 0.12-unit
+reverse toward the cell interior when front clearance is low, then cardinal
+turns and forward corrections for the remaining axes. Mapping pauses until
+the mouse stops within 0.06 of center. Recovery times out after 45 seconds if
+clearance cannot be established; invalid localization still requires a reset.
+
+Sensor gaps over 0.25 seconds now enter `TIMING_PAUSE`, command zero motion,
+and suspend odometry/map updates. Queued scans older than 0.25 seconds are
+discarded. Five fresh stationary pairs are required before matching wall
+planes on both axes and entering recentering recovery. Displacement uncertainty
+above 0.35 cells or heading uncertainty above 0.08 radians keeps the mouse
+paused for relocalization/reset. Logs include scan age, interval, gap count,
+and uncertainty. This is intentionally not guaranteed recovery from every gap.
+
+Live validation of timing recovery used the normal rendered simulator on port
+8081. Three gap recoveries resumed motion. A 350 ms SIGSTOP/SIGCONT interruption
+of the solver while the engine continued running was also exercised; the run
+subsequently remained paused with position uncertainty above the allowed bound.
+This validation did not establish an end-to-end goal completion.
 
 ---
 

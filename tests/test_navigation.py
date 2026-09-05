@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 import sys
 import unittest
+from collections import deque
+import random
 
 from student_agent.control import PID, PoseEstimator, WallCentering, side_rays_reliable
 from student_agent.navigation import AStarPlanner, MazeMap
@@ -12,6 +14,43 @@ from student_agent.state import Cell, Direction, MotionState, Pose, SensorValues
 
 
 class ControlTests(unittest.TestCase):
+    def test_crossed_edge_cannot_be_closed_by_sensor(self):
+        maze = MazeMap(3)
+        maze.mark_traversed(Cell(1, 1), Direction.NORTH)
+        maze.set_edge(Cell(2, 1), Direction.SOUTH, True)
+        self.assertIs(maze.edge(Cell(1, 1), Direction.NORTH), False)
+        self.assertIs(maze.edge(Cell(2, 1), Direction.SOUTH), False)
+        self.assertEqual(maze.conflicts, 1)
+
+    def test_oblique_and_ambiguous_ranges_do_not_write_walls(self):
+        navigator = Navigator()
+        navigator.pose.theta += 0.3
+        navigator.observe(SensorValues(0.5, 0.5, 0.5))
+        self.assertIsNone(navigator.maze.edge(navigator.cell, Direction.NORTH))
+        navigator.pose.theta = math.pi / 2
+        navigator.observe(SensorValues(0.65, 0.65, 0.65))
+        self.assertIsNone(navigator.maze.edge(navigator.cell, Direction.NORTH))
+
+    def test_astar_matches_breadth_first_search(self):
+        rng = random.Random(42)
+        for _ in range(100):
+            maze = MazeMap(5)
+            for r in range(5):
+                for c in range(5):
+                    for direction in (Direction.NORTH, Direction.EAST):
+                        maze.set_edge(Cell(r, c), direction, rng.random() < 0.3)
+            start, goal = Cell(0, 0), Cell(4, 4)
+            queue, distances = deque([start]), {start: 0}
+            while queue:
+                cell = queue.popleft()
+                for direction in Direction:
+                    nxt = direction.neighbour(cell)
+                    if maze.contains(nxt) and maze.edge(cell, direction) is not True and nxt not in distances:
+                        distances[nxt] = distances[cell] + 1
+                        queue.append(nxt)
+            route = AStarPlanner({goal}).path(maze, start)
+            self.assertEqual(len(route) - 1 if route else None, distances.get(goal))
+
     def test_wall_error_signs_and_band(self):
         for readings, sign in [
             ((0.6, 4.0, math.inf), 1), ((0.3, 4.0, math.inf), -1),
